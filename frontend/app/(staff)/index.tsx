@@ -11,6 +11,7 @@ import { DatabaseService } from '../../src/services/database';
 import { ClassSession, Batch } from '../../src/types';
 import { getFormattedDateHeader, getTodayISODate, formatTime12Hour } from '../../src/utils/date';
 import { useOffline } from '../../src/context/OfflineContext';
+import { NotificationEnableCard } from '../../src/components/ui/NotificationEnableCard';
 
 export default function StaffDashboard() {
   const router = useRouter();
@@ -79,6 +80,9 @@ export default function StaffDashboard() {
             You have {todaysClasses.length} assigned class{todaysClasses.length === 1 ? '' : 'es'} scheduled for today.
           </Text>
         </View>
+
+        {/* Web Push Background Notification Card */}
+        <NotificationEnableCard />
 
         {/* Offline Readiness Sync Card */}
         <View style={[styles.offlineSyncCard, SHADOWS.sm]}>

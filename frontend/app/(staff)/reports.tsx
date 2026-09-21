@@ -6,7 +6,12 @@ import { StatCard } from '../../src/components/ui/StatCard';
 import { DatabaseService } from '../../src/services/database';
 import { ReportSummary, Batch } from '../../src/types';
 
+import { useRouter } from 'expo-router';
+import { Button } from '../../src/components/ui/Button';
+import { Ionicons } from '@expo/vector-icons';
+
 export default function StaffReportsScreen() {
+  const router = useRouter();
   const { user } = useAuth();
   const [summary, setSummary] = useState<ReportSummary | null>(null);
   const [assignedBatches, setAssignedBatches] = useState<Batch[]>([]);
@@ -33,6 +38,20 @@ export default function StaffReportsScreen() {
       <View style={styles.statsGrid}>
         <StatCard title="Present Students" value={summary?.presentCount || 0} color={COLORS.success} />
         <StatCard title="Absent Students" value={summary?.absentCount || 0} color={COLORS.danger} />
+      </View>
+
+      {/* PDF Export Banner */}
+      <View style={[styles.pdfCard, SHADOWS.sm]}>
+        <Ionicons name="document-text-outline" size={28} color={COLORS.primary} />
+        <View style={{ flex: 1, marginLeft: 10 }}>
+          <Text style={styles.pdfTitle}>Download Student PDF Reports</Text>
+          <Text style={styles.pdfSub}>Filter Grade-wise, Batch-wise, or Monthly All-Present reports with counts.</Text>
+        </View>
+        <Button
+          title="Open PDF Reports"
+          onPress={() => router.push('/(staff)/pdf-reports')}
+          size="sm"
+        />
       </View>
 
       <Text style={[styles.sectionTitle, { marginTop: SPACING.md }]}>PERMITTED BATCH LIST</Text>
@@ -66,6 +85,25 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: SPACING.md,
     marginBottom: SPACING.md,
+  },
+  pdfCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: COLORS.card,
+    borderRadius: 14,
+    padding: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.borderLight,
+  },
+  pdfTitle: {
+    ...TYPOGRAPHY.h3,
+    fontSize: 15,
+  },
+  pdfSub: {
+    fontSize: 11,
+    color: COLORS.textMuted,
+    marginTop: 2,
   },
   batchCard: {
     backgroundColor: COLORS.card,

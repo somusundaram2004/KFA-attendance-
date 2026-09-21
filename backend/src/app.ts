@@ -8,6 +8,8 @@ import staffRoutes from './routes/staffRoutes';
 import batchRoutes from './routes/batchRoutes';
 import { authenticate, verifyHandshake, authorizeStaffBatch } from './middleware/authMiddleware';
 
+import notificationRoutes from './routes/notificationRoutes';
+
 const app = express();
 
 app.use(cors());
@@ -17,6 +19,9 @@ app.use(express.json());
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', service: 'KFA Attendance Backend API', timestamp: new Date().toISOString() });
 });
+
+// Push Notification Routes
+app.use('/api/notifications', notificationRoutes);
 
 // Authentication Routes (Public + Rate Limited)
 app.use('/api/auth', authRoutes);

@@ -69,17 +69,6 @@ export default function LoginScreen() {
     }
   };
 
-  const handleFillDemo = (type: 'admin' | 'staff') => {
-    if (type === 'admin') {
-      setEmail('admin@kfa.edu');
-      setPassword('AdminPass123!');
-    } else {
-      setEmail('staff.priya@kfa.edu');
-      setPassword('StaffPass123!');
-    }
-    setErrorMessage('');
-  };
-
   return (
     <KeyboardAvoidingView
       style={{ flex: 1 }}
@@ -149,26 +138,6 @@ export default function LoginScreen() {
             size="lg"
             style={{ marginTop: SPACING.md }}
           />
-
-          {/* Quick Demo Helpers */}
-          <View style={styles.demoSection}>
-            <Text style={styles.demoTitle}>Demo Sign-In Shortcuts:</Text>
-            <View style={styles.demoRow}>
-              <TouchableOpacity
-                style={styles.demoChip}
-                onPress={() => handleFillDemo('admin')}
-              >
-                <Text style={styles.demoChipText}>🔑 Fill Admin Credentials</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity
-                style={styles.demoChip}
-                onPress={() => handleFillDemo('staff')}
-              >
-                <Text style={styles.demoChipText}>👨‍🏫 Fill Staff Credentials</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
         </View>
 
         <Text style={styles.footerNote}>

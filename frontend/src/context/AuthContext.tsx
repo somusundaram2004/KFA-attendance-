@@ -37,6 +37,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       setIsLoading(true);
       const token = await AsyncStorage.getItem('kfa_session_token');
+      const savedUserStr = await AsyncStorage.getItem('@kfa_auth_user');
+      const savedProfileStr = await AsyncStorage.getItem('@kfa_auth_profile');
+
+      if (token && savedUserStr && savedProfileStr) {
+        const parsedUser = JSON.parse(savedUserStr);
+        const parsedProfile = JSON.parse(savedProfileStr);
+        setUser(parsedUser);
+        setProfile(parsedProfile);
+        setIsLoading(false);
+        return;
+      }
 
       if (token) {
         // Verify session with backend API
@@ -51,14 +62,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const data = await res.json();
           if (data.user) {
             setUser(data.user);
-            const prof = await DatabaseService.getProfile(data.user.id);
-            setProfile(prof || {
+            const prof = (await DatabaseService.getProfile(data.user.id)) || {
               id: data.user.id,
               full_name: data.user.full_name || 'Authenticated User',
               email: data.user.email,
               role: data.user.role as UserRole,
               status: 'ACTIVE',
-            });
+            };
+            setProfile(prof);
+            await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(data.user));
+            await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
             setIsLoading(false);
             return;
           }
@@ -73,6 +86,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           const prof = await DatabaseService.getProfile(session.user.id);
           if (prof && prof.status === 'ACTIVE') {
             setProfile(prof);
+            await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(session.user));
+            await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
           } else {
             await supabase.auth.signOut();
             setUser(null);
@@ -104,14 +119,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         if (data.success && data.token && data.user) {
           await AsyncStorage.setItem('kfa_session_token', data.token);
           setUser(data.user);
-          const prof = await DatabaseService.getProfile(data.user.id);
-          setProfile(prof || {
+          const prof = (await DatabaseService.getProfile(data.user.id)) || {
             id: data.user.id,
             full_name: data.user.full_name || cleanEmail,
             email: cleanEmail,
             role: data.user.role as UserRole,
             status: 'ACTIVE',
-          });
+          };
+          setProfile(prof);
+          await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(data.user));
+          await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
           setIsLoading(false);
           return { success: true };
         }
@@ -138,25 +155,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           }
           setUser(data.user);
           setProfile(prof);
+          await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(data.user));
+          await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
           setIsLoading(false);
           return { success: true };
         }
       }
 
-      // 3. Standalone Demo Credentials Fallback
+      // 3. Standalone Credentials Fallback
       if (cleanEmail === 'admin@kfa.edu' && pass === 'AdminPass123!') {
-        const prof = await DatabaseService.getProfile('u-admin-001');
+        const prof = (await DatabaseService.getProfile('u-admin-001')) || {
+          id: 'u-admin-001',
+          full_name: 'Dr. Ramesh Kumar (Admin)',
+          email: 'admin@kfa.edu',
+          role: 'ADMIN',
+          status: 'ACTIVE',
+        };
+        const uObj = { id: 'u-admin-001', email: cleanEmail, role: 'ADMIN' };
         await AsyncStorage.setItem('kfa_session_token', 'demo-session-token');
-        setUser({ id: 'u-admin-001', email: cleanEmail, role: 'ADMIN' });
+        await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(uObj));
+        await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
+        setUser(uObj);
         setProfile(prof);
         setIsLoading(false);
         return { success: true };
       }
 
       if (cleanEmail === 'staff.priya@kfa.edu' && pass === 'StaffPass123!') {
-        const prof = await DatabaseService.getProfile('u-staff-001');
+        const prof = (await DatabaseService.getProfile('u-staff-001')) || {
+          id: 'u-staff-001',
+          full_name: 'Mrs. Priya Sharma (Staff)',
+          email: 'staff.priya@kfa.edu',
+          role: 'STAFF',
+          status: 'ACTIVE',
+        };
+        const uObj = { id: 'u-staff-001', email: cleanEmail, role: 'STAFF' };
         await AsyncStorage.setItem('kfa_session_token', 'demo-session-token');
-        setUser({ id: 'u-staff-001', email: cleanEmail, role: 'STAFF' });
+        await AsyncStorage.setItem('@kfa_auth_user', JSON.stringify(uObj));
+        await AsyncStorage.setItem('@kfa_auth_profile', JSON.stringify(prof));
+        setUser(uObj);
         setProfile(prof);
         setIsLoading(false);
         return { success: true };
@@ -178,12 +215,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
       }).catch(() => null);
-      await AsyncStorage.removeItem('kfa_session_token');
     }
 
     if (isSupabaseConfigured) {
       await supabase.auth.signOut();
     }
+
+    await AsyncStorage.removeItem('kfa_session_token');
+    await AsyncStorage.removeItem('@kfa_auth_user');
+    await AsyncStorage.removeItem('@kfa_auth_profile');
 
     setUser(null);
     setProfile(null);

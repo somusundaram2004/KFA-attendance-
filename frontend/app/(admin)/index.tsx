@@ -10,6 +10,7 @@ import { Button } from '../../src/components/ui/Button';
 import { DatabaseService } from '../../src/services/database';
 import { ClassSession, ReportSummary } from '../../src/types';
 import { getFormattedDateHeader, getTodayISODate, formatTime12Hour } from '../../src/utils/date';
+import { NotificationEnableCard } from '../../src/components/ui/NotificationEnableCard';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -62,6 +63,9 @@ export default function AdminDashboard() {
         <Text style={styles.welcomeTitle}>Welcome back, {profile?.full_name || 'Admin'}</Text>
         <Text style={styles.welcomeSub}>Academy operations summary and class overview for today.</Text>
       </View>
+
+      {/* Web Push Background Notification Card */}
+      <NotificationEnableCard />
 
       {/* Admin Notifications Card */}
       {notifications.length > 0 && (

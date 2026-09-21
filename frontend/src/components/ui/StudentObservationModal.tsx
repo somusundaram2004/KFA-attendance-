@@ -103,7 +103,8 @@ export const StudentObservationModal: React.FC<StudentObservationModalProps> = (
           onChangeText={setDescription}
           multiline
           numberOfLines={3}
-          style={{ height: 80 }}
+          style={{ minHeight: 70, textAlignVertical: 'top', paddingTop: 8 }}
+          containerStyle={{ marginBottom: SPACING.md }}
         />
 
         <Button

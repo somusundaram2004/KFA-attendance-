@@ -3,6 +3,7 @@ import { View, Text, ScrollView, StyleSheet, TouchableOpacity, Alert } from 'rea
 import * as Print from 'expo-print';
 import * as Sharing from 'expo-sharing';
 import { Ionicons } from '@expo/vector-icons';
+import { useRouter } from 'expo-router';
 import { COLORS, SPACING, TYPOGRAPHY, SHADOWS } from '../../../src/constants/theme';
 import { FilterBar } from '../../../src/components/ui/FilterBar';
 import { StatCard } from '../../../src/components/ui/StatCard';
@@ -13,6 +14,7 @@ import { Grade, Batch, Student, ClassSession, AttendanceRecord, ReportSummary, F
 import { formatDateDDMMYYYY, getTodayISODate } from '../../../src/utils/date';
 
 export default function ReportsScreen() {
+  const router = useRouter();
   const [grades, setGrades] = useState<Grade[]>([]);
   const [batches, setBatches] = useState<Batch[]>([]);
   const [students, setStudents] = useState<Student[]>([]);
@@ -183,13 +185,12 @@ export default function ReportsScreen() {
           <View style={[styles.exportCard, SHADOWS.sm]}>
             <Ionicons name="document-text-outline" size={28} color={COLORS.primary} />
             <View style={{ marginLeft: 12, flex: 1 }}>
-              <Text style={styles.exportTitle}>Export Academy Report</Text>
-              <Text style={styles.exportSub}>Download structured PDF report for administrative audit.</Text>
+              <Text style={styles.exportTitle}>Student PDF Reports Engine</Text>
+              <Text style={styles.exportSub}>Filter Grade-wise, Batch-wise, or Monthly All-Present reports with counts and download PDF.</Text>
             </View>
             <Button
-              title="Export PDF"
-              onPress={handleExportPDF}
-              loading={exporting}
+              title="Open PDF Reports"
+              onPress={() => router.push('/(admin)/reports/student-pdf-reports')}
               size="sm"
             />
           </View>

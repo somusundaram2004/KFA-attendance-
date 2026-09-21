@@ -109,7 +109,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
     borderRadius: 10,
     paddingHorizontal: SPACING.md,
-    height: 48,
+    minHeight: 48,
   },
   inputError: {
     borderColor: COLORS.danger,
@@ -119,7 +119,7 @@ const styles = StyleSheet.create({
   },
   input: {
     flex: 1,
-    height: '100%',
+    minHeight: 36,
     fontSize: 14,
     color: COLORS.text,
   },

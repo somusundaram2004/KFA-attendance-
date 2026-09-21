@@ -31,6 +31,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Class Schedules', icon: 'calendar-outline', route: '/(admin)/classes' },
     { title: 'View Attendance Logs', icon: 'checkmark-done-circle-outline', route: '/(admin)/attendance/mark' },
     { title: 'Attendance Reports', icon: 'stats-chart-outline', route: '/(admin)/reports' },
+    { title: 'Student PDF Reports', icon: 'document-text-outline', route: '/(admin)/reports/student-pdf-reports' },
     { title: 'Grade / Level Management', icon: 'school-outline', route: '/(admin)/more/grades' },
     { title: 'Batch Management', icon: 'shapes-outline', route: '/(admin)/more/batches' },
     { title: 'Staff Directory', icon: 'person-add-outline', route: '/(admin)/more/staff' },
@@ -41,7 +42,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { title: 'Staff Dashboard', icon: 'home-outline', route: '/(staff)' },
     { title: 'My Classes', icon: 'calendar-outline', route: '/(staff)/classes' },
     { title: 'Mark Attendance', icon: 'checkmark-done-circle-outline', route: '/(staff)/attendance' },
+    { title: 'Previous Attendance', icon: 'time-outline', route: '/(staff)/history' },
     { title: 'Batch Reports', icon: 'stats-chart-outline', route: '/(staff)/reports' },
+    { title: 'Student PDF Reports', icon: 'document-text-outline', route: '/(staff)/pdf-reports' },
     { title: 'My Profile', icon: 'person-outline', route: '/(staff)/profile' },
   ];
 
