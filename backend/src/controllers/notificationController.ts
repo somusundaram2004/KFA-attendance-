@@ -25,17 +25,25 @@ export const getVapidPublicKey = (req: Request, res: Response) => {
   });
 };
 
-/**
- * Subscribe Browser Client to Web Push Notifications & Store in Supabase
- */
 export const subscribePushNotification = async (req: Request, res: Response) => {
   try {
-    const subscription: PushSubscriptionPayload = req.body;
+    const body = req.body || {};
+    const endpoint = body.endpoint || body.subscription?.endpoint;
+    const p256dh = body.keys?.p256dh || body.p256dh || body.subscription?.keys?.p256dh;
+    const authKey = body.keys?.auth || body.auth || body.subscription?.keys?.auth;
 
-    if (!subscription || !subscription.endpoint || !subscription.keys || !subscription.keys.p256dh || !subscription.keys.auth) {
+    if (!endpoint || !p256dh || !authKey) {
       console.warn('[PushNotification] Invalid push subscription payload received');
       return res.status(400).json({ success: false, error: 'Invalid push subscription payload' });
     }
+
+    const subscription: PushSubscriptionPayload = {
+      endpoint,
+      keys: {
+        p256dh,
+        auth: authKey,
+      },
+    };
 
     // Identify user from Bearer session token if available
     let userId: string | null = null;

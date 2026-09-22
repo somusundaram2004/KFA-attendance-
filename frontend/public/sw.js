@@ -2,15 +2,20 @@ const CACHE_NAME = 'kfa-attendance-v1';
 const ASSETS_TO_CACHE = [
   '/',
   '/index.html',
-  '/manifest.json',
-  '/login'
+  '/manifest.json'
 ];
 
-// Install Event
+// Install Event — Resilient individual caching so optional asset failures do not abort installation
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return Promise.allSettled(
+        ASSETS_TO_CACHE.map((url) =>
+          cache.add(url).catch((err) => {
+            console.warn(`[SW] Non-critical cache note for asset ${url}:`, err);
+          })
+        )
+      );
     })
   );
   self.skipWaiting();
