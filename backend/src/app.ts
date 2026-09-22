@@ -12,7 +12,15 @@ import notificationRoutes from './routes/notificationRoutes';
 
 const app = express();
 
-app.use(cors());
+const allowedOrigins = process.env.FRONTEND_URL
+  ? [process.env.FRONTEND_URL, 'http://localhost:8081', 'http://localhost:3000', 'http://localhost:19006']
+  : '*';
+
+app.use(cors({
+  origin: allowedOrigins,
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-handshake-token', 'x-handshake-key'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+}));
 app.use(express.json());
 
 // Health Check Endpoint

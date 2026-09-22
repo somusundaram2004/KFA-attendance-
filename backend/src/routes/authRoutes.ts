@@ -95,35 +95,38 @@ router.post('/login', loginRateLimiter, async (req: Request, res: Response) => {
       }
     }
 
-    // 2. Demo User Fallback (Strict role mapping: STAFF or ADMIN)
-    const demoUser = DEMO_USERS[cleanEmail];
-    if (demoUser && demoUser.pass === password) {
-      const sessionToken = `st_${crypto.randomBytes(32).toString('hex')}`;
-      const sessionId = `s_${crypto.randomBytes(16).toString('hex')}`;
+    // 2. Demo User Fallback (Strict role mapping: STAFF or ADMIN; disabled in production when Supabase is active)
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (!isProduction || !process.env.SUPABASE_URL) {
+      const demoUser = DEMO_USERS[cleanEmail];
+      if (demoUser && demoUser.pass === password) {
+        const sessionToken = `st_${crypto.randomBytes(32).toString('hex')}`;
+        const sessionId = `s_${crypto.randomBytes(16).toString('hex')}`;
 
-      sessionStore.set(sessionToken, {
-        sessionId,
-        user: {
-          id: demoUser.id,
-          email: demoUser.email,
-          role: demoUser.role,
-          full_name: demoUser.full_name,
-        },
-        createdAt: Date.now(),
-      });
+        sessionStore.set(sessionToken, {
+          sessionId,
+          user: {
+            id: demoUser.id,
+            email: demoUser.email,
+            role: demoUser.role,
+            full_name: demoUser.full_name,
+          },
+          createdAt: Date.now(),
+        });
 
-      logSecurityEvent(SecurityEventType.LOGIN_SUCCESS, { userId: demoUser.id, sessionId });
+        logSecurityEvent(SecurityEventType.LOGIN_SUCCESS, { userId: demoUser.id, sessionId });
 
-      return res.json({
-        success: true,
-        token: sessionToken,
-        user: {
-          id: demoUser.id,
-          email: demoUser.email,
-          role: demoUser.role,
-          full_name: demoUser.full_name,
-        },
-      });
+        return res.json({
+          success: true,
+          token: sessionToken,
+          user: {
+            id: demoUser.id,
+            email: demoUser.email,
+            role: demoUser.role,
+            full_name: demoUser.full_name,
+          },
+        });
+      }
     }
 
     logSecurityEvent(SecurityEventType.LOGIN_FAILURE, { message: `Failed login attempt for ${cleanEmail}` });

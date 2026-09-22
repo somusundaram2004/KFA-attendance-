@@ -17,13 +17,17 @@ export interface AuthenticatedRequest extends Request {
 // Global active server session store
 export const sessionStore = new Map<string, { sessionId: string; user: AuthenticatedUser; createdAt: number }>();
 
-// Populate fallback session for demo testing if no token passed
+const isProduction = process.env.NODE_ENV === 'production';
 const DEMO_SESSION_TOKEN = 'demo-session-token';
-sessionStore.set(DEMO_SESSION_TOKEN, {
-  sessionId: 's_demo_001',
-  user: { id: 'u-admin-001', email: 'admin@kfa.edu', role: 'ADMIN', full_name: 'Demo Admin' },
-  createdAt: Date.now(),
-});
+
+// Populate fallback session for dev/testing only (disabled in production)
+if (!isProduction) {
+  sessionStore.set(DEMO_SESSION_TOKEN, {
+    sessionId: 's_demo_001',
+    user: { id: 'u-admin-001', email: 'admin@kfa.edu', role: 'ADMIN', full_name: 'Demo Admin' },
+    createdAt: Date.now(),
+  });
+}
 
 /**
  * Middleware 1: Authenticate Session Token
@@ -31,12 +35,14 @@ sessionStore.set(DEMO_SESSION_TOKEN, {
 export const authenticate = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
   const authHeader = req.headers.authorization;
   if (!authHeader) {
-    // Check fallback demo headers for dev testing
-    const demoToken = sessionStore.get(DEMO_SESSION_TOKEN);
-    if (demoToken) {
-      req.user = demoToken.user;
-      req.sessionId = demoToken.sessionId;
-      return next();
+    // Check fallback demo headers for dev testing (only in non-production)
+    if (!isProduction) {
+      const demoToken = sessionStore.get(DEMO_SESSION_TOKEN);
+      if (demoToken) {
+        req.user = demoToken.user;
+        req.sessionId = demoToken.sessionId;
+        return next();
+      }
     }
     return res.status(401).json({ error: 'Unauthorized' });
   }
