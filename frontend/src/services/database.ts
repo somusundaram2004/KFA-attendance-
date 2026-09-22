@@ -17,6 +17,7 @@ import {
   ClassStatus
 } from '../types';
 import { getTodayISODate } from '../utils/date';
+import { isValidUUID } from '../utils/uuid';
 
 // Initial Mock Seed Data for standalone demo mode
 let mockProfiles: Profile[] = [
@@ -311,24 +312,41 @@ export const DatabaseService = {
   },
 
   async createProfile(profile: Partial<Profile>): Promise<Profile> {
-    const newP: Profile = {
-      id: profile.id || `u-${Date.now()}`,
+    const isProdUUID = profile.id && isValidUUID(profile.id);
+    const insertPayload: any = {
       full_name: profile.full_name || 'Staff User',
       email: profile.email || 'staff@kfa.edu',
       role: profile.role || 'STAFF',
       status: profile.status || 'ACTIVE',
       phone: profile.phone || '',
-      created_at: new Date().toISOString()
     };
+    if (isProdUUID) {
+      insertPayload.id = profile.id;
+    }
+
     if (isSupabaseConfigured) {
-      const { data } = await supabase.from('profiles').insert(newP).select().single();
+      const { data, error } = await supabase.from('profiles').insert(insertPayload).select().single();
+      if (error) {
+        console.error('[DatabaseService] createProfile error:', error.message);
+        throw new Error(`Failed to create profile: ${error.message}`);
+      }
       return data as Profile;
     }
+
+    const newP: Profile = {
+      id: profile.id || `u-${Date.now()}`,
+      ...insertPayload,
+      created_at: new Date().toISOString()
+    };
     mockProfiles.push(newP);
     return newP;
   },
 
   async updateProfileStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void> {
+    if (!isValidUUID(id) && isSupabaseConfigured) {
+      console.warn('[DatabaseService] updateProfileStatus: Skipping DB update for invalid UUID:', id);
+      return;
+    }
     if (isSupabaseConfigured) {
       await supabase.from('profiles').update({ status }).eq('id', id);
       return;
@@ -340,13 +358,38 @@ export const DatabaseService = {
   // GRADES
   async getGrades(): Promise<Grade[]> {
     if (isSupabaseConfigured) {
-      const { data } = await supabase.from('grades').select('*').order('display_order');
+      const { data, error } = await supabase.from('grades').select('*').order('display_order');
+      if (error) {
+        console.error('[DatabaseService] getGrades error:', error.message);
+        return [...mockGrades].sort((a, b) => a.display_order - b.display_order);
+      }
       return (data || []) as Grade[];
     }
     return [...mockGrades].sort((a, b) => a.display_order - b.display_order);
   },
 
   async createGrade(grade: Partial<Grade>): Promise<Grade> {
+    if (isSupabaseConfigured) {
+      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
+      const { data, error } = await supabase
+        .from('grades')
+        .insert({
+          name: grade.name || 'New Grade',
+          description: grade.description || '',
+          display_order: grade.display_order || mockGrades.length + 1,
+          is_active: grade.is_active !== undefined ? grade.is_active : true,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DatabaseService] createGrade error:', error.message);
+        throw new Error(`Failed to create grade: ${error.message}`);
+      }
+      console.log(`[DatabaseService] Successfully created Grade in Supabase with UUID: ${data.id}`);
+      return data as Grade;
+    }
+
     const newG: Grade = {
       id: `g-${Date.now()}`,
       name: grade.name || 'New Grade',
@@ -354,17 +397,20 @@ export const DatabaseService = {
       display_order: grade.display_order || mockGrades.length + 1,
       is_active: true
     };
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('grades').insert(newG).select().single();
-      return data as Grade;
-    }
     mockGrades.push(newG);
     return newG;
   },
 
   async updateGrade(id: string, updates: Partial<Grade>): Promise<void> {
     if (isSupabaseConfigured) {
-      await supabase.from('grades').update(updates).eq('id', id);
+      if (!isValidUUID(id)) {
+        console.warn('[DatabaseService] updateGrade: Skipping DB update for non-UUID id:', id);
+        return;
+      }
+      const updateData = { ...updates };
+      delete updateData.id;
+      const { error } = await supabase.from('grades').update(updateData).eq('id', id);
+      if (error) console.error('[DatabaseService] updateGrade error:', error.message);
       return;
     }
     const idx = mockGrades.findIndex(g => g.id === id);
@@ -377,10 +423,14 @@ export const DatabaseService = {
   async getBatches(staffId?: string): Promise<Batch[]> {
     if (isSupabaseConfigured) {
       let query = supabase.from('batches').select('*, grade:grades(name)');
-      if (staffId) {
+      if (staffId && isValidUUID(staffId)) {
         query = query.eq('batch_staff.staff_id', staffId);
       }
-      const { data } = await query;
+      const { data, error } = await query;
+      if (error) {
+        console.error('[DatabaseService] getBatches error:', error.message);
+        return [...mockBatches];
+      }
       return (data || []) as Batch[];
     }
     if (staffId) {
@@ -390,6 +440,33 @@ export const DatabaseService = {
   },
 
   async createBatch(batchData: Partial<Batch>): Promise<Batch> {
+    const validGradeId = batchData.grade_id && isValidUUID(batchData.grade_id) ? batchData.grade_id : null;
+
+    if (isSupabaseConfigured) {
+      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
+      const { data, error } = await supabase
+        .from('batches')
+        .insert({
+          name: batchData.name || 'New Batch',
+          description: batchData.description || '',
+          grade_id: validGradeId,
+          grade_name: batchData.grade_name || null,
+          is_active: batchData.is_active !== undefined ? batchData.is_active : true,
+          staff_ids: batchData.staff_ids || [],
+          staff_names: batchData.staff_names || [],
+          schedules: batchData.schedules || [],
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DatabaseService] createBatch error:', error.message);
+        throw new Error(`Failed to create batch: ${error.message}`);
+      }
+      console.log(`[DatabaseService] Successfully created Batch in Supabase with UUID: ${data.id}`);
+      return data as Batch;
+    }
+
     const grade = mockGrades.find(g => g.id === batchData.grade_id);
     const newB: Batch = {
       id: `b-${Date.now()}`,
@@ -402,15 +479,6 @@ export const DatabaseService = {
       staff_names: mockProfiles.filter(p => batchData.staff_ids?.includes(p.id)).map(p => p.full_name),
       schedules: batchData.schedules || []
     };
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('batches').insert({
-        name: newB.name,
-        description: newB.description,
-        grade_id: newB.grade_id,
-        is_active: true
-      }).select().single();
-      return data as Batch;
-    }
     mockBatches.push(newB);
     return newB;
   },
@@ -422,7 +490,17 @@ export const DatabaseService = {
       if (filters?.searchQuery) {
         query = query.or(`full_name.ilike.%${filters.searchQuery}%,student_id.ilike.%${filters.searchQuery}%`);
       }
-      const { data } = await query;
+      if (filters?.gradeId && isValidUUID(filters.gradeId)) {
+        query = query.eq('current_grade_id', filters.gradeId);
+      }
+      if (filters?.batchId && isValidUUID(filters.batchId)) {
+        query = query.eq('current_batch_id', filters.batchId);
+      }
+      const { data, error } = await query;
+      if (error) {
+        console.error('[DatabaseService] getStudents error:', error.message);
+        return [...mockStudents];
+      }
       return (data || []) as Student[];
     }
 
@@ -437,12 +515,10 @@ export const DatabaseService = {
       );
     }
 
-    // STRICT GRADE FILTER
     if (filters?.gradeId) {
       result = result.filter(s => s.current_grade_id === filters.gradeId);
     }
 
-    // STRICT BATCH FILTER
     if (filters?.batchId) {
       result = result.filter(s => s.current_batch_id === filters.batchId);
     }
@@ -455,7 +531,7 @@ export const DatabaseService = {
     gradeHistory: StudentGradeHistory[];
     batchHistory: StudentBatchHistory[];
   }> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isValidUUID(id)) {
       const { data: student } = await supabase.from('students').select('*').eq('id', id).single();
       const { data: gradeHistory } = await supabase.from('student_grades').select('*, grade:grades(name)').eq('student_id', id);
       const { data: batchHistory } = await supabase.from('student_batches').select('*, batch:batches(name)').eq('student_id', id);
@@ -473,6 +549,38 @@ export const DatabaseService = {
   },
 
   async createStudent(studentData: Partial<Student>, gradeId?: string, batchId?: string): Promise<Student> {
+    const validGradeId = gradeId && isValidUUID(gradeId) ? gradeId : null;
+    const validBatchId = batchId && isValidUUID(batchId) ? batchId : null;
+
+    if (isSupabaseConfigured) {
+      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
+      const { data, error } = await supabase
+        .from('students')
+        .insert({
+          student_id: studentData.student_id || `KFA-2026-${Math.floor(100 + Math.random() * 900)}`,
+          full_name: studentData.full_name || 'New Student',
+          phone: studentData.phone || '',
+          email: studentData.email || '',
+          photo_url: studentData.photo_url || null,
+          status: 'ACTIVE',
+          joining_date: studentData.joining_date || getTodayISODate(),
+          current_grade_id: validGradeId,
+          current_grade_name: studentData.current_grade_name || null,
+          current_batch_id: validBatchId,
+          current_batch_name: studentData.current_batch_name || null,
+          attendance_rate: 100.0,
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DatabaseService] createStudent error:', error.message);
+        throw new Error(`Failed to create student: ${error.message}`);
+      }
+      console.log(`[DatabaseService] Successfully created Student in Supabase with UUID: ${data.id}`);
+      return data as Student;
+    }
+
     const grade = mockGrades.find(g => g.id === gradeId);
     const batch = mockBatches.find(b => b.id === batchId);
 
@@ -491,12 +599,6 @@ export const DatabaseService = {
       current_batch_name: batch?.name,
       attendance_rate: 100.0
     };
-
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('students').insert(newS).select().single();
-      return data as Student;
-    }
-
     mockStudents.push(newS);
 
     if (gradeId && grade) {
@@ -605,9 +707,38 @@ export const DatabaseService = {
   },
 
   async createCompensationSession(originalSessionId: string, date: string, time: string, batchId: string, notes?: string): Promise<ClassSession> {
-    const original = mockSessions.find(s => s.id === originalSessionId);
+    const validBatchId = batchId && isValidUUID(batchId) ? batchId : null;
+    const validOrigSessionId = originalSessionId && isValidUUID(originalSessionId) ? originalSessionId : null;
     const batch = mockBatches.find(b => b.id === batchId);
 
+    if (isSupabaseConfigured) {
+      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
+      const { data, error } = await supabase
+        .from('class_sessions')
+        .insert({
+          batch_id: validBatchId,
+          batch_name: batch?.name || 'Batch',
+          grade_id: batch?.grade_id && isValidUUID(batch.grade_id) ? batch.grade_id : null,
+          grade_name: batch?.grade_name || null,
+          session_date: date,
+          start_time: time,
+          end_time: '18:00',
+          class_type: 'COMPENSATION',
+          status: 'SCHEDULED',
+          original_session_id: validOrigSessionId,
+          attendance_count: { present: 0, absent: 0, leave: 0, late: 0, total: 0 }
+        })
+        .select()
+        .single();
+
+      if (error) {
+        console.error('[DatabaseService] createCompensationSession error:', error.message);
+        throw new Error(`Failed to create compensation session: ${error.message}`);
+      }
+      return data as ClassSession;
+    }
+
+    const original = mockSessions.find(s => s.id === originalSessionId);
     const newComp: ClassSession = {
       id: `cs-comp-${Date.now()}`,
       batch_id: batchId,
@@ -624,19 +755,13 @@ export const DatabaseService = {
       created_by: 'u-admin-001',
       attendance_count: { present: 0, absent: 0, leave: 0, late: 0, total: 0 }
     };
-
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('class_sessions').insert(newComp).select().single();
-      return data as ClassSession;
-    }
-
     mockSessions.push(newComp);
     return newComp;
   },
 
   // ATTENDANCE & DUPLICATE PREVENTION
   async getAttendanceForSession(sessionId: string): Promise<AttendanceRecord[]> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isValidUUID(sessionId)) {
       const { data } = await supabase.from('attendance').select('*, student:students(full_name, student_id)').eq('class_session_id', sessionId);
       return (data || []) as AttendanceRecord[];
     }
@@ -648,21 +773,24 @@ export const DatabaseService = {
     records: { student_id: string; status: AttendanceStatus; notes?: string }[],
     userId: string
   ): Promise<{ success: boolean; duplicate?: boolean }> {
-    if (isSupabaseConfigured) {
+    if (isSupabaseConfigured && isValidUUID(sessionId)) {
+      const validMarkedBy = userId && isValidUUID(userId) ? userId : null;
       for (const rec of records) {
-        await supabase.from('attendance').upsert({
-          class_session_id: sessionId,
-          student_id: rec.student_id,
-          status: rec.status,
-          notes: rec.notes,
-          marked_by: userId,
-          updated_at: new Date().toISOString()
-        }, { onConflict: 'class_session_id,student_id' });
+        if (isValidUUID(rec.student_id)) {
+          await supabase.from('attendance').upsert({
+            class_session_id: sessionId,
+            student_id: rec.student_id,
+            status: rec.status,
+            notes: rec.notes || '',
+            marked_by: validMarkedBy,
+            updated_at: new Date().toISOString()
+          }, { onConflict: 'class_session_id,student_id' });
+        }
       }
       return { success: true };
     }
 
-    // Update Session status to COMPLETED & record audit logs
+    // Update Session status to COMPLETED & record audit logs for offline/mock mode
     const session = mockSessions.find(s => s.id === sessionId);
     if (session) {
       session.status = 'COMPLETED';
@@ -744,8 +872,6 @@ export const DatabaseService = {
 
   // REPORT ENGINE & ACCURATE FORMULA
   async getReportSummary(filters?: FilterOptions): Promise<ReportSummary> {
-    // Attendance % = Present / (Completed Classes) * 100
-    // Cancelled classes are NOT counted as absences.
     const sessions = await this.getClassSessions(filters);
     const completed = sessions.filter(s => s.status === 'COMPLETED');
     const cancelled = sessions.filter(s => s.status === 'CANCELLED');
@@ -783,7 +909,28 @@ export const DatabaseService = {
   // OBSERVATIONS & COMPLAINTS
   async createObservation(obsData: any): Promise<any> {
     if (isSupabaseConfigured) {
-      const { data } = await supabase.from('observations').insert(obsData).select().single();
+      const insertPayload: any = {
+        student_name: obsData.student_name || null,
+        category: obsData.category || 'General',
+        description: obsData.description || '',
+        attendance_date: obsData.attendance_date || getTodayISODate(),
+      };
+      if (obsData.student_id && isValidUUID(obsData.student_id)) {
+        insertPayload.student_id = obsData.student_id;
+      }
+      if (obsData.batch_id && isValidUUID(obsData.batch_id)) {
+        insertPayload.batch_id = obsData.batch_id;
+      }
+      if (obsData.staff_id && isValidUUID(obsData.staff_id)) {
+        insertPayload.staff_id = obsData.staff_id;
+      }
+
+      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
+      const { data, error } = await supabase.from('observations').insert(insertPayload).select().single();
+      if (error) {
+        console.error('[DatabaseService] createObservation error:', error.message);
+        throw new Error(`Failed to create observation: ${error.message}`);
+      }
       return data;
     }
     mockObservations.push(obsData);
@@ -792,7 +939,7 @@ export const DatabaseService = {
 
   async getObservations(): Promise<any[]> {
     if (isSupabaseConfigured) {
-      const { data } = await supabase.from('observations').select('*');
+      const { data } = await supabase.from('observations').select('*').order('created_at', { ascending: false });
       return data || [];
     }
     return mockObservations;
@@ -801,7 +948,26 @@ export const DatabaseService = {
   // ADMIN NOTIFICATIONS
   async createAdminNotification(notification: any): Promise<any> {
     if (isSupabaseConfigured) {
-      const { data } = await supabase.from('admin_notifications').insert(notification).select().single();
+      const insertPayload: any = {
+        title: notification.title || 'Notification',
+        message: notification.message || '',
+        student_name: notification.student_name || null,
+        batch_name: notification.batch_name || null,
+        staff_name: notification.staff_name || null,
+        category: notification.category || null,
+        description: notification.description || null,
+        is_read: Boolean(notification.is_read),
+        sync_status: notification.sync_status || 'SYNCED',
+      };
+      if (notification.id && isValidUUID(notification.id)) {
+        insertPayload.id = notification.id;
+      }
+
+      const { data, error } = await supabase.from('admin_notifications').insert(insertPayload).select().single();
+      if (error) {
+        console.error('[DatabaseService] createAdminNotification error:', error.message);
+        throw new Error(`Failed to create notification: ${error.message}`);
+      }
       return data;
     }
     const exists = mockAdminNotifications.some(n => n.id === notification.id);

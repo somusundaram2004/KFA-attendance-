@@ -1,14 +1,22 @@
 import { Router } from 'express';
-import { getAttendance, saveAttendance, saveObservation } from '../controllers/attendanceController';
-import { roleMiddleware } from '../middleware/authMiddleware';
+import {
+  getAttendance,
+  saveAttendance,
+  saveObservation,
+  getObservations,
+  getClassSessions,
+  createClassSession,
+} from '../controllers/attendanceController';
 
 const router = Router();
 
-// GET attendance: Both ADMIN and STAFF can view attendance records
 router.get('/', getAttendance);
+router.post('/', saveAttendance);
 
-// POST attendance / observation: ONLY STAFF can mark or modify attendance records
-router.post('/', roleMiddleware(['STAFF']), saveAttendance);
-router.post('/observation', roleMiddleware(['STAFF']), saveObservation);
+router.get('/observations', getObservations);
+router.post('/observation', saveObservation);
+
+router.get('/sessions', getClassSessions);
+router.post('/session', createClassSession);
 
 export default router;

@@ -6,6 +6,7 @@ import attendanceRoutes from './routes/attendanceRoutes';
 import studentRoutes from './routes/studentRoutes';
 import staffRoutes from './routes/staffRoutes';
 import batchRoutes from './routes/batchRoutes';
+import gradeRoutes from './routes/gradeRoutes';
 import { authenticate, verifyHandshake, authorizeStaffBatch } from './middleware/authMiddleware';
 
 import notificationRoutes from './routes/notificationRoutes';
@@ -42,5 +43,6 @@ app.use('/api/attendance', authenticate, verifyHandshake, authorizeStaffBatch, a
 app.use('/api/students', authenticate, verifyHandshake, authorizeStaffBatch, studentRoutes);
 app.use('/api/staff', authenticate, verifyHandshake, staffRoutes);
 app.use('/api/batches', authenticate, verifyHandshake, authorizeStaffBatch, batchRoutes);
+app.use('/api/grades', authenticate, verifyHandshake, gradeRoutes);
 
 export default app;
