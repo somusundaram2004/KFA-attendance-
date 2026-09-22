@@ -1,3 +1,5 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { performTwoKeyHandshake } from './handshakeService';
 import { supabase, isSupabaseConfigured } from '../lib/supabase';
 import {
   Profile,
@@ -289,53 +291,82 @@ let mockAuditLogs: AttendanceAudit[] = [
   }
 ];
 
+const BACKEND_URL = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:5000';
+
+async function apiCall<T>(endpoint: string, options: RequestInit = {}): Promise<T | null> {
+  try {
+    const token = await AsyncStorage.getItem('kfa_session_token');
+    let hsHeaders: Record<string, string> = {};
+
+    // For protected routes, attempt two-key security handshake if session token exists
+    if (token && endpoint.startsWith('/api/') && !endpoint.startsWith('/api/security')) {
+      const hs = await performTwoKeyHandshake();
+      if (hs) {
+        hsHeaders = hs as unknown as Record<string, string>;
+      }
+    }
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...hsHeaders,
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...(options.headers as Record<string, string> || {}),
+    };
+
+    const response = await fetch(`${BACKEND_URL}${endpoint}`, {
+      ...options,
+      headers,
+    });
+
+    if (!response.ok) {
+      console.warn(`[BackendAPI] ${options.method || 'GET'} ${endpoint} status: ${response.status}`);
+      return null;
+    }
+
+    const data = await response.json();
+    return data;
+  } catch (error: any) {
+    console.warn(`[BackendAPI] Error calling ${endpoint}:`, error.message);
+    return null;
+  }
+}
+
 // ==========================================
 // DATABASE SERVICE METHODS
 // ==========================================
 export const DatabaseService = {
   // PROFILES
   async getProfile(userId: string): Promise<Profile | null> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('profiles').select('*').eq('id', userId).single();
-      if (error) return null;
-      return data as Profile;
+    const res = await apiCall<{ success: boolean; user: Profile }>('/api/auth/me');
+    if (res && res.success && res.user) {
+      return res.user;
     }
     return mockProfiles.find(p => p.id === userId || p.email === userId) || mockProfiles[0];
   },
 
   async getAllProfiles(): Promise<Profile[]> {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('profiles').select('*').order('full_name');
-      return (data || []) as Profile[];
+    const res = await apiCall<{ success: boolean; staff: Profile[] }>('/api/staff');
+    if (res && res.success && Array.isArray(res.staff) && res.staff.length > 0) {
+      return res.staff;
     }
     return [...mockProfiles];
   },
 
   async createProfile(profile: Partial<Profile>): Promise<Profile> {
-    const isProdUUID = profile.id && isValidUUID(profile.id);
-    const insertPayload: any = {
+    const res = await apiCall<{ success: boolean; staff: Profile }>('/api/staff', {
+      method: 'POST',
+      body: JSON.stringify(profile),
+    });
+    if (res && res.success && res.staff) {
+      return res.staff;
+    }
+    const newP: Profile = {
+      id: profile.id || `u-${Date.now()}`,
       full_name: profile.full_name || 'Staff User',
       email: profile.email || 'staff@kfa.edu',
       role: profile.role || 'STAFF',
       status: profile.status || 'ACTIVE',
       phone: profile.phone || '',
-    };
-    if (isProdUUID) {
-      insertPayload.id = profile.id;
-    }
-
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('profiles').insert(insertPayload).select().single();
-      if (error) {
-        console.error('[DatabaseService] createProfile error:', error.message);
-        throw new Error(`Failed to create profile: ${error.message}`);
-      }
-      return data as Profile;
-    }
-
-    const newP: Profile = {
-      id: profile.id || `u-${Date.now()}`,
-      ...insertPayload,
       created_at: new Date().toISOString()
     };
     mockProfiles.push(newP);
@@ -343,53 +374,37 @@ export const DatabaseService = {
   },
 
   async updateProfileStatus(id: string, status: 'ACTIVE' | 'INACTIVE'): Promise<void> {
-    if (!isValidUUID(id) && isSupabaseConfigured) {
-      console.warn('[DatabaseService] updateProfileStatus: Skipping DB update for invalid UUID:', id);
-      return;
-    }
-    if (isSupabaseConfigured) {
-      await supabase.from('profiles').update({ status }).eq('id', id);
-      return;
-    }
+    const res = await apiCall<{ success: boolean }>(`/api/staff/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify({ status }),
+    });
+    if (res && res.success) return;
     const idx = mockProfiles.findIndex(p => p.id === id);
     if (idx !== -1) mockProfiles[idx].status = status;
   },
 
   // GRADES
   async getGrades(): Promise<Grade[]> {
-    if (isSupabaseConfigured) {
-      const { data, error } = await supabase.from('grades').select('*').order('display_order');
-      if (error) {
-        console.error('[DatabaseService] getGrades error:', error.message);
-        return [...mockGrades].sort((a, b) => a.display_order - b.display_order);
-      }
-      return (data || []) as Grade[];
+    const res = await apiCall<{ success: boolean; grades: Grade[] }>('/api/grades');
+    if (res && res.success && Array.isArray(res.grades) && res.grades.length > 0) {
+      return res.grades;
     }
     return [...mockGrades].sort((a, b) => a.display_order - b.display_order);
   },
 
   async createGrade(grade: Partial<Grade>): Promise<Grade> {
-    if (isSupabaseConfigured) {
-      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
-      const { data, error } = await supabase
-        .from('grades')
-        .insert({
-          name: grade.name || 'New Grade',
-          description: grade.description || '',
-          display_order: grade.display_order || mockGrades.length + 1,
-          is_active: grade.is_active !== undefined ? grade.is_active : true,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[DatabaseService] createGrade error:', error.message);
-        throw new Error(`Failed to create grade: ${error.message}`);
-      }
-      console.log(`[DatabaseService] Successfully created Grade in Supabase with UUID: ${data.id}`);
-      return data as Grade;
+    const res = await apiCall<{ success: boolean; grade: Grade }>('/api/grades', {
+      method: 'POST',
+      body: JSON.stringify({
+        name: grade.name || 'New Grade',
+        description: grade.description || '',
+        display_order: grade.display_order || mockGrades.length + 1,
+        is_active: grade.is_active !== undefined ? grade.is_active : true,
+      }),
+    });
+    if (res && res.success && res.grade) {
+      return res.grade;
     }
-
     const newG: Grade = {
       id: `g-${Date.now()}`,
       name: grade.name || 'New Grade',
@@ -402,17 +417,11 @@ export const DatabaseService = {
   },
 
   async updateGrade(id: string, updates: Partial<Grade>): Promise<void> {
-    if (isSupabaseConfigured) {
-      if (!isValidUUID(id)) {
-        console.warn('[DatabaseService] updateGrade: Skipping DB update for non-UUID id:', id);
-        return;
-      }
-      const updateData = { ...updates };
-      delete updateData.id;
-      const { error } = await supabase.from('grades').update(updateData).eq('id', id);
-      if (error) console.error('[DatabaseService] updateGrade error:', error.message);
-      return;
-    }
+    const res = await apiCall<{ success: boolean }>(`/api/grades/${id}`, {
+      method: 'PUT',
+      body: JSON.stringify(updates),
+    });
+    if (res && res.success) return;
     const idx = mockGrades.findIndex(g => g.id === id);
     if (idx !== -1) {
       mockGrades[idx] = { ...mockGrades[idx], ...updates };
@@ -421,17 +430,12 @@ export const DatabaseService = {
 
   // BATCHES
   async getBatches(staffId?: string): Promise<Batch[]> {
-    if (isSupabaseConfigured) {
-      let query = supabase.from('batches').select('*, grade:grades(name)');
-      if (staffId && isValidUUID(staffId)) {
-        query = query.eq('batch_staff.staff_id', staffId);
+    const res = await apiCall<{ success: boolean; batches: Batch[] }>('/api/batches');
+    if (res && res.success && Array.isArray(res.batches) && res.batches.length > 0) {
+      if (staffId) {
+        return res.batches.filter(b => b.staff_ids?.includes(staffId));
       }
-      const { data, error } = await query;
-      if (error) {
-        console.error('[DatabaseService] getBatches error:', error.message);
-        return [...mockBatches];
-      }
-      return (data || []) as Batch[];
+      return res.batches;
     }
     if (staffId) {
       return mockBatches.filter(b => b.staff_ids?.includes(staffId));
@@ -440,33 +444,13 @@ export const DatabaseService = {
   },
 
   async createBatch(batchData: Partial<Batch>): Promise<Batch> {
-    const validGradeId = batchData.grade_id && isValidUUID(batchData.grade_id) ? batchData.grade_id : null;
-
-    if (isSupabaseConfigured) {
-      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
-      const { data, error } = await supabase
-        .from('batches')
-        .insert({
-          name: batchData.name || 'New Batch',
-          description: batchData.description || '',
-          grade_id: validGradeId,
-          grade_name: batchData.grade_name || null,
-          is_active: batchData.is_active !== undefined ? batchData.is_active : true,
-          staff_ids: batchData.staff_ids || [],
-          staff_names: batchData.staff_names || [],
-          schedules: batchData.schedules || [],
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[DatabaseService] createBatch error:', error.message);
-        throw new Error(`Failed to create batch: ${error.message}`);
-      }
-      console.log(`[DatabaseService] Successfully created Batch in Supabase with UUID: ${data.id}`);
-      return data as Batch;
+    const res = await apiCall<{ success: boolean; batch: Batch }>('/api/batches', {
+      method: 'POST',
+      body: JSON.stringify(batchData),
+    });
+    if (res && res.success && res.batch) {
+      return res.batch;
     }
-
     const grade = mockGrades.find(g => g.id === batchData.grade_id);
     const newB: Batch = {
       id: `b-${Date.now()}`,
@@ -485,45 +469,26 @@ export const DatabaseService = {
 
   // STUDENTS & COMBINED FILTERING
   async getStudents(filters?: FilterOptions): Promise<Student[]> {
-    if (isSupabaseConfigured) {
-      let query = supabase.from('students').select('*');
-      if (filters?.searchQuery) {
-        query = query.or(`full_name.ilike.%${filters.searchQuery}%,student_id.ilike.%${filters.searchQuery}%`);
-      }
-      if (filters?.gradeId && isValidUUID(filters.gradeId)) {
-        query = query.eq('current_grade_id', filters.gradeId);
-      }
-      if (filters?.batchId && isValidUUID(filters.batchId)) {
-        query = query.eq('current_batch_id', filters.batchId);
-      }
-      const { data, error } = await query;
-      if (error) {
-        console.error('[DatabaseService] getStudents error:', error.message);
-        return [...mockStudents];
-      }
-      return (data || []) as Student[];
-    }
-
-    let result = [...mockStudents];
+    const res = await apiCall<{ success: boolean; students: Student[] }>('/api/students');
+    let list = (res && res.success && Array.isArray(res.students) && res.students.length > 0)
+      ? res.students
+      : [...mockStudents];
 
     if (filters?.searchQuery) {
       const q = filters.searchQuery.toLowerCase();
-      result = result.filter(s =>
+      list = list.filter(s =>
         s.full_name.toLowerCase().includes(q) ||
         s.student_id.toLowerCase().includes(q) ||
         (s.phone && s.phone.includes(q))
       );
     }
-
     if (filters?.gradeId) {
-      result = result.filter(s => s.current_grade_id === filters.gradeId);
+      list = list.filter(s => s.current_grade_id === filters.gradeId);
     }
-
     if (filters?.batchId) {
-      result = result.filter(s => s.current_batch_id === filters.batchId);
+      list = list.filter(s => s.current_batch_id === filters.batchId);
     }
-
-    return result;
+    return list;
   },
 
   async getStudentById(id: string): Promise<{
@@ -531,14 +496,12 @@ export const DatabaseService = {
     gradeHistory: StudentGradeHistory[];
     batchHistory: StudentBatchHistory[];
   }> {
-    if (isSupabaseConfigured && isValidUUID(id)) {
-      const { data: student } = await supabase.from('students').select('*').eq('id', id).single();
-      const { data: gradeHistory } = await supabase.from('student_grades').select('*, grade:grades(name)').eq('student_id', id);
-      const { data: batchHistory } = await supabase.from('student_batches').select('*, batch:batches(name)').eq('student_id', id);
+    const res = await apiCall<{ success: boolean; student: Student }>('/api/students/' + id);
+    if (res && res.success && res.student) {
       return {
-        student: student as Student,
-        gradeHistory: (gradeHistory || []) as StudentGradeHistory[],
-        batchHistory: (batchHistory || []) as StudentBatchHistory[]
+        student: res.student,
+        gradeHistory: mockStudentGradeHistory.filter(gh => gh.student_id === id),
+        batchHistory: mockStudentBatchHistory.filter(bh => bh.student_id === id)
       };
     }
 
@@ -549,36 +512,16 @@ export const DatabaseService = {
   },
 
   async createStudent(studentData: Partial<Student>, gradeId?: string, batchId?: string): Promise<Student> {
-    const validGradeId = gradeId && isValidUUID(gradeId) ? gradeId : null;
-    const validBatchId = batchId && isValidUUID(batchId) ? batchId : null;
-
-    if (isSupabaseConfigured) {
-      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
-      const { data, error } = await supabase
-        .from('students')
-        .insert({
-          student_id: studentData.student_id || `KFA-2026-${Math.floor(100 + Math.random() * 900)}`,
-          full_name: studentData.full_name || 'New Student',
-          phone: studentData.phone || '',
-          email: studentData.email || '',
-          photo_url: studentData.photo_url || null,
-          status: 'ACTIVE',
-          joining_date: studentData.joining_date || getTodayISODate(),
-          current_grade_id: validGradeId,
-          current_grade_name: studentData.current_grade_name || null,
-          current_batch_id: validBatchId,
-          current_batch_name: studentData.current_batch_name || null,
-          attendance_rate: 100.0,
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[DatabaseService] createStudent error:', error.message);
-        throw new Error(`Failed to create student: ${error.message}`);
-      }
-      console.log(`[DatabaseService] Successfully created Student in Supabase with UUID: ${data.id}`);
-      return data as Student;
+    const res = await apiCall<{ success: boolean; student: Student }>('/api/students', {
+      method: 'POST',
+      body: JSON.stringify({
+        ...studentData,
+        current_grade_id: gradeId,
+        current_batch_id: batchId,
+      }),
+    });
+    if (res && res.success && res.student) {
+      return res.student;
     }
 
     const grade = mockGrades.find(g => g.id === gradeId);
@@ -628,19 +571,12 @@ export const DatabaseService = {
 
   async updateStudentGrade(studentId: string, newGradeId: string): Promise<void> {
     const grade = mockGrades.find(g => g.id === newGradeId);
-    if (!grade) return;
 
-    if (isSupabaseConfigured) {
-      // Mark old history inactive & create new history
-      await supabase.from('student_grades').update({ is_current: false, end_date: getTodayISODate() }).eq('student_id', studentId);
-      await supabase.from('student_grades').insert({
-        student_id: studentId,
-        grade_id: newGradeId,
-        start_date: getTodayISODate(),
-        is_current: true
-      });
-      return;
-    }
+    const res = await apiCall<{ success: boolean }>('/api/students/' + studentId, {
+      method: 'PUT',
+      body: JSON.stringify({ current_grade_id: newGradeId }),
+    });
+    if (res && res.success) return;
 
     // Non-destructive update on mock history
     mockStudentGradeHistory.forEach(gh => {
@@ -650,17 +586,19 @@ export const DatabaseService = {
       }
     });
 
-    mockStudentGradeHistory.push({
-      id: `sgh-${Date.now()}`,
-      student_id: studentId,
-      grade_id: newGradeId,
-      grade_name: grade.name,
-      start_date: getTodayISODate(),
-      is_current: true
-    });
+    if (grade) {
+      mockStudentGradeHistory.push({
+        id: `sgh-${Date.now()}`,
+        student_id: studentId,
+        grade_id: newGradeId,
+        grade_name: grade.name,
+        start_date: getTodayISODate(),
+        is_current: true
+      });
+    }
 
     const s = mockStudents.find(st => st.id === studentId);
-    if (s) {
+    if (s && grade) {
       s.current_grade_id = newGradeId;
       s.current_grade_name = grade.name;
     }
@@ -668,36 +606,30 @@ export const DatabaseService = {
 
   // CLASS SESSIONS
   async getClassSessions(filters?: FilterOptions): Promise<ClassSession[]> {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('class_sessions').select('*').order('session_date', { ascending: false });
-      return (data || []) as ClassSession[];
+    const res = await apiCall<{ success: boolean; sessions: ClassSession[] }>('/api/attendance/sessions');
+    if (res && res.success && Array.isArray(res.sessions) && res.sessions.length > 0) {
+      let list = res.sessions;
+      if (filters?.date) list = list.filter(s => s.session_date === filters.date);
+      if (filters?.batchId) list = list.filter(s => s.batch_id === filters.batchId);
+      if (filters?.gradeId) list = list.filter(s => s.grade_id === filters.gradeId);
+      if (filters?.classType) list = list.filter(s => s.class_type === filters.classType);
+      return list.sort((a, b) => b.session_date.localeCompare(a.session_date));
     }
 
     let list = [...mockSessions];
-    if (filters?.date) {
-      list = list.filter(s => s.session_date === filters.date);
-    }
-    if (filters?.batchId) {
-      list = list.filter(s => s.batch_id === filters.batchId);
-    }
-    if (filters?.gradeId) {
-      list = list.filter(s => s.grade_id === filters.gradeId);
-    }
-    if (filters?.classType) {
-      list = list.filter(s => s.class_type === filters.classType);
-    }
-
+    if (filters?.date) list = list.filter(s => s.session_date === filters.date);
+    if (filters?.batchId) list = list.filter(s => s.batch_id === filters.batchId);
+    if (filters?.gradeId) list = list.filter(s => s.grade_id === filters.gradeId);
+    if (filters?.classType) list = list.filter(s => s.class_type === filters.classType);
     return list.sort((a, b) => b.session_date.localeCompare(a.session_date));
   },
 
   async cancelClassSession(sessionId: string, reason: string): Promise<void> {
-    if (isSupabaseConfigured) {
-      await supabase.from('class_sessions').update({
-        status: 'CANCELLED',
-        cancel_reason: reason
-      }).eq('id', sessionId);
-      return;
-    }
+    const res = await apiCall<{ success: boolean }>('/api/attendance/sessions/' + sessionId + '/cancel', {
+      method: 'POST',
+      body: JSON.stringify({ reason }),
+    });
+    if (res && res.success) return;
 
     const session = mockSessions.find(s => s.id === sessionId);
     if (session) {
@@ -707,35 +639,21 @@ export const DatabaseService = {
   },
 
   async createCompensationSession(originalSessionId: string, date: string, time: string, batchId: string, notes?: string): Promise<ClassSession> {
-    const validBatchId = batchId && isValidUUID(batchId) ? batchId : null;
-    const validOrigSessionId = originalSessionId && isValidUUID(originalSessionId) ? originalSessionId : null;
     const batch = mockBatches.find(b => b.id === batchId);
 
-    if (isSupabaseConfigured) {
-      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
-      const { data, error } = await supabase
-        .from('class_sessions')
-        .insert({
-          batch_id: validBatchId,
-          batch_name: batch?.name || 'Batch',
-          grade_id: batch?.grade_id && isValidUUID(batch.grade_id) ? batch.grade_id : null,
-          grade_name: batch?.grade_name || null,
-          session_date: date,
-          start_time: time,
-          end_time: '18:00',
-          class_type: 'COMPENSATION',
-          status: 'SCHEDULED',
-          original_session_id: validOrigSessionId,
-          attendance_count: { present: 0, absent: 0, leave: 0, late: 0, total: 0 }
-        })
-        .select()
-        .single();
-
-      if (error) {
-        console.error('[DatabaseService] createCompensationSession error:', error.message);
-        throw new Error(`Failed to create compensation session: ${error.message}`);
-      }
-      return data as ClassSession;
+    const res = await apiCall<{ success: boolean; session: ClassSession }>('/api/attendance/sessions', {
+      method: 'POST',
+      body: JSON.stringify({
+        original_session_id: originalSessionId,
+        session_date: date,
+        start_time: time,
+        batch_id: batchId,
+        class_type: 'COMPENSATION',
+        notes,
+      }),
+    });
+    if (res && res.success && res.session) {
+      return res.session;
     }
 
     const original = mockSessions.find(s => s.id === originalSessionId);
@@ -761,36 +679,30 @@ export const DatabaseService = {
 
   // ATTENDANCE & DUPLICATE PREVENTION
   async getAttendanceForSession(sessionId: string): Promise<AttendanceRecord[]> {
-    if (isSupabaseConfigured && isValidUUID(sessionId)) {
-      const { data } = await supabase.from('attendance').select('*, student:students(full_name, student_id)').eq('class_session_id', sessionId);
-      return (data || []) as AttendanceRecord[];
+    const res: any = await apiCall('/api/attendance?sessionId=' + sessionId);
+    if (res && res.success && Array.isArray(res.attendance) && res.attendance.length > 0) {
+      return res.attendance;
     }
     return mockAttendance.filter(a => a.class_session_id === sessionId);
   },
 
   async saveAttendance(
     sessionId: string,
-    records: { student_id: string; status: AttendanceStatus; notes?: string }[],
+    records: Array<{ student_id: string; status: AttendanceStatus; notes?: string }>,
     userId: string
   ): Promise<{ success: boolean; duplicate?: boolean }> {
-    if (isSupabaseConfigured && isValidUUID(sessionId)) {
-      const validMarkedBy = userId && isValidUUID(userId) ? userId : null;
-      for (const rec of records) {
-        if (isValidUUID(rec.student_id)) {
-          await supabase.from('attendance').upsert({
-            class_session_id: sessionId,
-            student_id: rec.student_id,
-            status: rec.status,
-            notes: rec.notes || '',
-            marked_by: validMarkedBy,
-            updated_at: new Date().toISOString()
-          }, { onConflict: 'class_session_id,student_id' });
-        }
-      }
+    const res: any = await apiCall('/api/attendance', {
+      method: 'POST',
+      body: JSON.stringify({
+        class_session_id: sessionId,
+        records,
+        marked_by: userId,
+      }),
+    });
+    if (res && res.success) {
       return { success: true };
     }
 
-    // Update Session status to COMPLETED & record audit logs for offline/mock mode
     const session = mockSessions.find(s => s.id === sessionId);
     if (session) {
       session.status = 'COMPLETED';
@@ -849,13 +761,7 @@ export const DatabaseService = {
     }
 
     if (session) {
-      session.attendance_count = {
-        present,
-        absent,
-        leave,
-        late,
-        total: records.length
-      };
+      session.attendance_count = { present, absent, leave, late, total: records.length };
     }
 
     return { success: true };
@@ -863,9 +769,9 @@ export const DatabaseService = {
 
   // AUDIT LOGS
   async getAuditLogs(): Promise<AttendanceAudit[]> {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('attendance_audit').select('*').order('created_at', { ascending: false });
-      return (data || []) as AttendanceAudit[];
+    const res: any = await apiCall('/api/attendance/audit-logs');
+    if (res && res.success && Array.isArray(res.logs)) {
+      return res.logs;
     }
     return [...mockAuditLogs].sort((a, b) => b.created_at.localeCompare(a.created_at));
   },
@@ -908,67 +814,33 @@ export const DatabaseService = {
 
   // OBSERVATIONS & COMPLAINTS
   async createObservation(obsData: any): Promise<any> {
-    if (isSupabaseConfigured) {
-      const insertPayload: any = {
-        student_name: obsData.student_name || null,
-        category: obsData.category || 'General',
-        description: obsData.description || '',
-        attendance_date: obsData.attendance_date || getTodayISODate(),
-      };
-      if (obsData.student_id && isValidUUID(obsData.student_id)) {
-        insertPayload.student_id = obsData.student_id;
-      }
-      if (obsData.batch_id && isValidUUID(obsData.batch_id)) {
-        insertPayload.batch_id = obsData.batch_id;
-      }
-      if (obsData.staff_id && isValidUUID(obsData.staff_id)) {
-        insertPayload.staff_id = obsData.staff_id;
-      }
-
-      // Omit `id` so PostgreSQL DEFAULT uuid_generate_v4() assigns primary key UUID
-      const { data, error } = await supabase.from('observations').insert(insertPayload).select().single();
-      if (error) {
-        console.error('[DatabaseService] createObservation error:', error.message);
-        throw new Error(`Failed to create observation: ${error.message}`);
-      }
-      return data;
+    const res: any = await apiCall('/api/attendance/observation', {
+      method: 'POST',
+      body: JSON.stringify(obsData),
+    });
+    if (res && res.success && res.observation) {
+      return res.observation;
     }
     mockObservations.push(obsData);
     return obsData;
   },
 
   async getObservations(): Promise<any[]> {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('observations').select('*').order('created_at', { ascending: false });
-      return data || [];
+    const res: any = await apiCall('/api/attendance/observations');
+    if (res && res.success && Array.isArray(res.observations)) {
+      return res.observations;
     }
     return mockObservations;
   },
 
   // ADMIN NOTIFICATIONS
   async createAdminNotification(notification: any): Promise<any> {
-    if (isSupabaseConfigured) {
-      const insertPayload: any = {
-        title: notification.title || 'Notification',
-        message: notification.message || '',
-        student_name: notification.student_name || null,
-        batch_name: notification.batch_name || null,
-        staff_name: notification.staff_name || null,
-        category: notification.category || null,
-        description: notification.description || null,
-        is_read: Boolean(notification.is_read),
-        sync_status: notification.sync_status || 'SYNCED',
-      };
-      if (notification.id && isValidUUID(notification.id)) {
-        insertPayload.id = notification.id;
-      }
-
-      const { data, error } = await supabase.from('admin_notifications').insert(insertPayload).select().single();
-      if (error) {
-        console.error('[DatabaseService] createAdminNotification error:', error.message);
-        throw new Error(`Failed to create notification: ${error.message}`);
-      }
-      return data;
+    const res: any = await apiCall('/api/notifications/admin', {
+      method: 'POST',
+      body: JSON.stringify(notification),
+    });
+    if (res && res.success && res.notification) {
+      return res.notification;
     }
     const exists = mockAdminNotifications.some(n => n.id === notification.id);
     if (!exists) {
@@ -978,9 +850,9 @@ export const DatabaseService = {
   },
 
   async getAdminNotifications(): Promise<any[]> {
-    if (isSupabaseConfigured) {
-      const { data } = await supabase.from('admin_notifications').select('*').order('created_at', { ascending: false });
-      return data || [];
+    const res: any = await apiCall('/api/notifications/admin');
+    if (res && res.success && Array.isArray(res.notifications)) {
+      return res.notifications;
     }
     return mockAdminNotifications;
   },
